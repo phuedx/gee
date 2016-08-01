@@ -20,11 +20,10 @@ gee() {
 # Create the gee network namespace.
 ip netns add gee
 
-# Create the veth0 and veth1 Virtual Ethernet devices, which will be treated as egress and ingress
-# devices respectively.
+# Create the veth0 and veth1 Virtual Ethernet devices.
 ip link add veth0 type veth peer name veth1
 
-# Add the ingress device to the network namespace.
+# Add the egress device to the network namespace.
 ip link set veth1 netns gee
 
 ip addr add 10.1.1.0/31 dev veth0
@@ -33,23 +32,25 @@ gee ip addr add 10.1.1.1/31 dev veth1
 ip link set veth0 up
 gee ip link set veth1 up
 
-# Route traffic from the network namespace via 10.1.1.0 - the egress device.
+# Route traffic from the network namespace via the peer Virtual Ethernet device, veth0.
 gee ip route add default via 10.1.1.0
 
 # Enable NAT for traffic from the network namespace.
 iptables -t nat -A POSTROUTING -s 10.1.1.0/31 -d 0.0.0.0/0 -j MASQUERADE
 sysctl net.ipv4.ip_forward=1 >/dev/null
 
-# Adjust bandwidth and round trip time for the egress interface.
+# Adjust bandwidth and round trip time for ingress traffic, i.e. traffic flowing into the network
+# namespace.
 tc qdisc del dev veth0 root 2>/dev/null || true
 tc qdisc add dev veth0 root handle 1: htb default 10
-tc class add dev veth0 parent 1:1 classid 1:10 htb rate "${EGRESS_BANDWIDTH}" ceil "${EGRESS_BANDWIDTH}"
+tc class add dev veth0 parent 1:1 classid 1:10 htb rate "${INGRESS_BANDWIDTH}" ceil "${INGRESS_BANDWIDTH}"
 tc qdisc add dev veth0 parent 1:10 netem delay "${ROUND_TRIP_TIME}" "${ROUND_TRIP_TIME_CORRELATION}" distribution normal
 
-# Adjust bandwidth and round trip time for the ingress interface.
+# Adjust bandwidth and round trip time for egress traffic, i.e. traffic flowing out of the network
+# namespace.
 gee tc qdisc del dev veth1 root 2>/dev/null || true
 gee tc qdisc add dev veth1 root handle 1: htb default 10
-gee tc class add dev veth1 parent 1:1 classid 1:10 htb rate "${INGRESS_BANDWIDTH}" ceil "${INGRESS_BANDWIDTH}"
+gee tc class add dev veth1 parent 1:1 classid 1:10 htb rate "${EGRESS_BANDWIDTH}" ceil "${EGRESS_BANDWIDTH}"
 
 # Finally, create the gee alias, which, as above, executes a command in the gee network namespace.
 echo "alias gee=\"ip netns exec gee\"" >> ~/.bashrc
